@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${PLUGIN_ROOT}/codex/hook.mjs\" codex",
+            "command": "\"${PLUGIN_ROOT}/codex/run.cmd\" codex",
             "timeout": 120,
             "statusMessage": "Scoring tool output with Jev"
           }
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${PLUGIN_ROOT}/codex/hook.mjs\" codex",
+            "command": "\"${PLUGIN_ROOT}/codex/run.cmd\" codex",
             "timeout": 30,
             "statusMessage": "Restoring tool output Jev kept"
           }

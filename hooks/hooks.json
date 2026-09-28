@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/codex/hook.mjs\" claude",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/codex/run.cmd\" claude",
             "timeout": 120,
             "statusMessage": "Scoring tool output with Jev"
           }
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/codex/hook.mjs\" claude",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/codex/run.cmd\" claude",
             "timeout": 30,
             "statusMessage": "Restoring tool output Jev kept"
           }

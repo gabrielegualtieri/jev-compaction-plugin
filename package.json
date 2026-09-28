@@ -1,6 +1,6 @@
 {
   "name": "fast-jev-compaction",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Verbatim context compaction with TypeSafe Jev, directly or through OpenRouter. Claude Code plugin and Codex plugin.",
   "type": "module",
   "license": "MIT",

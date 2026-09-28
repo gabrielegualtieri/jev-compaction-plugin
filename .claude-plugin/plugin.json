@@ -1,6 +1,6 @@
 {
   "name": "fast-jev-compaction",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Verbatim Jev compaction for Claude Code. TypeSafe or OpenRouter.",
   "license": "MIT",
   "userConfig": {

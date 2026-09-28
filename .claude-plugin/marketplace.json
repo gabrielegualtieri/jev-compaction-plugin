@@ -9,7 +9,7 @@
       "name": "fast-jev-compaction",
       "source": "./",
       "description": "Verbatim Jev compaction for Claude Code, via TypeSafe or OpenRouter.",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "license": "MIT",
       "homepage": "https://github.com/gabrielegualtieri/jev-compaction-plugin"
     }

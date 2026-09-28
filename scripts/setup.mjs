@@ -79,7 +79,8 @@ export function writeJsonFile(path, value, mode) {
 
 export function readJsonFile(path) {
   try {
-    return JSON.parse(readFileSync(path, 'utf8'));
+    const text = readFileSync(path, 'utf8').replace(/^\uFEFF/, '');
+    return JSON.parse(text);
   } catch (error) {
     if (error && error.code === 'ENOENT') return undefined;
     throw error;

@@ -1,3 +1,30 @@
 {
-  "modules": ["./fast-jev.ts"]
+  "modules": ["./fast-jev.ts"],
+  "hooks": {
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/codex/hook.mjs\" claude",
+            "timeout": 120,
+            "statusMessage": "Scoring tool output with Jev"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/codex/hook.mjs\" claude",
+            "timeout": 30,
+            "statusMessage": "Restoring tool output Jev kept"
+          }
+        ]
+      }
+    ]
+  }
 }

@@ -1,8 +1,7 @@
 #!/usr/bin/env node
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 
 import { parseUserConfigText } from '../shared/config.mjs';
 import { parseProvider, providerOf } from '../shared/providers.mjs';
@@ -19,23 +18,41 @@ function dataDir(env = process.env) {
   return join(homedir(), '.config', 'jev-compaction', 'codex-sessions');
 }
 
-export function loadCodexConfig(env = process.env, read = readFileSync) {
-  let host = {};
+function trace(text) {
+  const line = `${new Date().toISOString()} ${text}\n`;
   try {
-    host = parseUserConfigText(read(configPathFrom(env), 'utf8')).codex ?? {};
+    const dir = join(homedir(), '.config', 'jev-compaction');
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(join(dir, 'last-run.log'), line);
   } catch {
-    host = {};
+    // The desktop app can still show stderr when the log directory is locked.
   }
-  const provider = providerOf(host.provider ?? parseProvider(env.JEV_COMPACTION_PROVIDER));
+  process.stderr.write(`jev-compaction: ${text}\n`);
+}
+
+export function loadHostConfig(host, env = process.env, read = readFileSync) {
+  const name = host === 'claude' ? 'claude' : 'codex';
+  let section = {};
+  try {
+    section = parseUserConfigText(read(configPathFrom(env), 'utf8'))[name] ?? {};
+  } catch {
+    section = {};
+  }
+  const provider = providerOf(section.provider ?? parseProvider(env.JEV_COMPACTION_PROVIDER));
   return {
+    host: name,
     provider: provider.id,
-    apiKey: host.apiKey || env[provider.envKey] || '',
-    model: host.model || provider.defaultModel,
-    baseUrl: host.baseUrl || provider.baseUrl,
-    keepThreshold: host.keepThreshold ?? 0.5,
-    preserveRecentMessages: host.preserveRecentMessages ?? 6,
+    apiKey: section.apiKey || env[provider.envKey] || '',
+    model: section.model || provider.defaultModel,
+    baseUrl: section.baseUrl || provider.baseUrl,
+    keepThreshold: section.keepThreshold ?? 0.5,
+    preserveRecentMessages: section.preserveRecentMessages ?? 6,
     envKey: provider.envKey,
   };
+}
+
+export function loadCodexConfig(env = process.env, read = readFileSync) {
+  return loadHostConfig('codex', env, read);
 }
 
 function configPathFrom(env) {
@@ -53,11 +70,12 @@ async function readStdin() {
 }
 
 export async function onPreCompact(event, env = process.env, deps = {}) {
-  const config = loadCodexConfig(env, deps.read ?? readFileSync);
+  const config = loadHostConfig(deps.host ?? 'codex', env, deps.read ?? readFileSync);
+  trace(`${config.host} PreCompact provider=${config.provider} key=${config.apiKey ? 'yes' : 'no'}`);
   if (!config.apiKey) {
     return {
       continue: true,
-      systemMessage: `jev-compaction: ${config.envKey} is not set. Codex will summarize as usual. Run node scripts/setup.mjs --host codex.`,
+      systemMessage: `jev-compaction: ${config.envKey} is not set for ${config.host}. The desktop app will summarize as usual.`,
     };
   }
   if (!event.transcript_path) {
@@ -87,9 +105,11 @@ export async function onPreCompact(event, env = process.env, deps = {}) {
     { mode: 0o600 },
   );
   const scored = decisions.filter((decision) => decision.reason !== 'pinned').length;
+  const detail = `${config.host} scored ${scored} calls via ${config.provider} (${requests} request(s)). ${kept.length} verbatim result(s) will be restored after the summary.`;
+  trace(detail);
   return {
     continue: true,
-    systemMessage: `jev-compaction: scored ${scored} calls via ${config.provider} (${requests} request(s)). ${kept.length} verbatim result(s) will be restored after the summary.`,
+    systemMessage: `jev-compaction: ${detail}`,
   };
 }
 
@@ -131,23 +151,26 @@ export function onSessionStart(event, env = process.env) {
   };
 }
 
-async function main() {
+async function main(host) {
+  trace(`${host} hook started`);
   try {
     const raw = await readStdin();
     const event = raw.trim() ? JSON.parse(raw) : {};
-    if (event.hook_event_name === 'PreCompact') emit(await onPreCompact(event));
+    if (event.hook_event_name === 'PreCompact') emit(await onPreCompact(event, process.env, { host }));
     else if (event.hook_event_name === 'SessionStart') emit(onSessionStart(event));
-    else emit({ continue: true });
+    else {
+      trace(`${host} ignored event ${event.hook_event_name ?? 'none'}`);
+      emit({ continue: true });
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`jev-compaction: ${message}\n`);
+    trace(`${host} failed: ${message}`);
     emit({
       continue: true,
-      systemMessage: `jev-compaction: ${message}. Codex will summarize as usual.`,
+      systemMessage: `jev-compaction: ${message}. The desktop app will summarize as usual.`,
     });
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main();
-}
+const hostArg = process.argv.find((arg) => arg === 'claude' || arg === 'codex');
+if (hostArg) main(hostArg);

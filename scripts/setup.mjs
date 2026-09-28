@@ -194,14 +194,17 @@ function ask(rl, prompt) {
   });
 }
 
-function askSecret(prompt) {
-  return new Promise((resolve, reject) => {
+function askSecret(rl, prompt) {
+  // Raw mode on Windows PowerShell echoes the key and then closes stdin, so the
+  // next question never runs and the file is not saved. Readline finishes the wizard.
+  if (process.platform === 'win32' || !process.stdin.isTTY || typeof process.stdin.setRawMode !== 'function') {
+    process.stderr.write('The key will be visible while you type.\n');
+    return ask(rl, prompt);
+  }
+  return new Promise((resolve) => {
     const stdin = process.stdin;
-    if (typeof stdin.setRawMode !== 'function') {
-      reject(new Error('Cannot hide the API key: stdin is not a TTY. Pass --api-key.'));
-      return;
-    }
     process.stderr.write(prompt);
+    rl.pause();
     stdin.setRawMode(true);
     stdin.resume();
     stdin.setEncoding('utf8');
@@ -210,14 +213,15 @@ function askSecret(prompt) {
       if (chunk === '\u0003') {
         stdin.setRawMode(false);
         stdin.removeListener('data', onData);
+        rl.resume();
         process.stderr.write('\n');
         process.exit(130);
       }
-      if (chunk === '\r' || chunk === '\n') {
+      if (chunk === '\r' || chunk === '\n' || chunk.includes('\n') || chunk.includes('\r')) {
         stdin.setRawMode(false);
         stdin.removeListener('data', onData);
-        stdin.pause();
         process.stderr.write('\n');
+        rl.resume();
         resolve(value.trim());
         return;
       }
@@ -225,6 +229,7 @@ function askSecret(prompt) {
         value = value.slice(0, -1);
         return;
       }
+      if (chunk.startsWith('\u001b')) return;
       value += chunk;
     };
     stdin.on('data', onData);
@@ -240,7 +245,7 @@ async function askHostPatch(rl, host) {
     if (!provider) process.stderr.write('Type typesafe or openrouter.\n');
   }
   const spec = providerOf(provider);
-  const apiKey = await askSecret(`${spec.envKey}: `);
+  const apiKey = await askSecret(rl, `${spec.envKey}: `);
   if (!apiKey) throw new Error('The API key cannot be empty.');
   const model = await ask(rl, `Model (${spec.defaultModel}): `);
   const thresholds = await ask(rl, 'Change thresholds? [y/N]: ');

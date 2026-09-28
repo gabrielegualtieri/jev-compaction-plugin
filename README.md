@@ -27,7 +27,7 @@ node scripts/setup.mjs
 It asks which host (`claude`, `codex`, or `both`), then for each one:
 
 1. Provider: `typesafe` or `openrouter`.
-2. The API key, without echoing it.
+2. The API key. On macOS and Linux it is hidden. On Windows it stays visible, then the wizard continues and saves.
 3. Optional model and thresholds. Enter keeps the defaults.
 
 The key is written to `~/.config/jev-compaction/config.json` (mode `0600`):

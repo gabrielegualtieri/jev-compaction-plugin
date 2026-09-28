@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { mergeClaudeSettings, saveHost } from '../scripts/setup.mjs';
+import { installClaudeCommandHooks, mergeClaudeSettings, saveHost } from '../scripts/setup.mjs';
 
 describe('setup', () => {
   it('stores each host separately and enables Claude function hooks', () => {
@@ -31,6 +31,16 @@ describe('setup', () => {
     expect(settings.env.JEV_COMPACTION_PROVIDER).toBe('openrouter');
     expect(settings.env.OPENROUTER_API_KEY).toBe('or-secret-1234');
     expect(settings.env.TYPESAFE_API_KEY).toBeUndefined();
+    expect(settings.hooks.PreCompact[0].hooks[0].command).toContain('run.cmd');
+    expect(settings.hooks.SessionStart[0].matcher).toBe('compact');
+  });
+
+  it('does not duplicate Claude command hooks', () => {
+    const once = installClaudeCommandHooks({ theme: 'dark' }, 'D:\\repo\\codex\\run.cmd claude');
+    const twice = installClaudeCommandHooks(once, 'D:\\repo\\codex\\run.cmd claude');
+    expect(twice.theme).toBe('dark');
+    expect(twice.hooks.PreCompact).toHaveLength(1);
+    expect(twice.hooks.SessionStart).toHaveLength(1);
   });
 
   it('preserves unrelated Claude settings', () => {

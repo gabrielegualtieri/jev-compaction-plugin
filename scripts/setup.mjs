@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'n
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 
 import { parseUserConfigText, redactKey, upsertHost } from '../shared/config.mjs';
 import { parseProvider, providerOf } from '../shared/providers.mjs';
@@ -12,8 +12,47 @@ export function defaultConfigPath() {
   return join(homedir(), '.config', 'jev-compaction', 'config.json');
 }
 
+export function repoRootFromHere() {
+  return join(dirname(fileURLToPath(import.meta.url)), '..');
+}
+
 export function defaultClaudeSettingsPath() {
   return join(homedir(), '.claude', 'settings.json');
+}
+
+export function claudeHookCommand(repoRoot) {
+  return `"${join(repoRoot, 'codex', 'run.cmd')}" claude`;
+}
+
+export function installClaudeCommandHooks(current, command) {
+  const settings =
+    current && typeof current === 'object' && !Array.isArray(current) ? { ...current } : {};
+  const hooks =
+    settings.hooks && typeof settings.hooks === 'object' && !Array.isArray(settings.hooks)
+      ? { ...settings.hooks }
+      : {};
+  const already = (groups) =>
+    Array.isArray(groups) &&
+    groups.some((group) =>
+      (group?.hooks ?? []).some((hook) => String(hook?.command ?? '').includes('run.cmd')),
+    );
+  if (!already(hooks.PreCompact)) {
+    hooks.PreCompact = [
+      ...(Array.isArray(hooks.PreCompact) ? hooks.PreCompact : []),
+      { hooks: [{ type: 'command', command, timeout: 120 }] },
+    ];
+  }
+  if (!already(hooks.SessionStart)) {
+    hooks.SessionStart = [
+      ...(Array.isArray(hooks.SessionStart) ? hooks.SessionStart : []),
+      {
+        matcher: 'compact',
+        hooks: [{ type: 'command', command, timeout: 30 }],
+      },
+    ];
+  }
+  settings.hooks = hooks;
+  return settings;
 }
 
 export function mergeClaudeSettings(current, { provider, apiKey, envKey }) {
@@ -74,11 +113,14 @@ export function saveHost({
     const current = readJsonFile(claudeSettingsPath);
     writeJsonFile(
       claudeSettingsPath,
-      mergeClaudeSettings(current, {
-        provider: provider.id,
-        apiKey: patch.apiKey,
-        envKey: provider.envKey,
-      }),
+      installClaudeCommandHooks(
+        mergeClaudeSettings(current, {
+          provider: provider.id,
+          apiKey: patch.apiKey,
+          envKey: provider.envKey,
+        }),
+        claudeHookCommand(repoRootFromHere()),
+      ),
       0o600,
     );
   }
@@ -258,6 +300,16 @@ async function interactive(argv) {
 function main(argv = process.argv.slice(2)) {
   if (hasFlag(argv, '--help') || hasFlag(argv, '-h')) {
     process.stderr.write(usage());
+    return;
+  }
+  if (hasFlag(argv, '--install-hooks')) {
+    const claudeSettingsPath = flagValue(argv, '--claude-settings') || defaultClaudeSettingsPath();
+    writeJsonFile(
+      claudeSettingsPath,
+      installClaudeCommandHooks(readJsonFile(claudeSettingsPath) ?? {}, claudeHookCommand(repoRootFromHere())),
+      0o600,
+    );
+    process.stderr.write(`Claude hooks written to ${claudeSettingsPath}\n`);
     return;
   }
   const host = flagValue(argv, '--host');

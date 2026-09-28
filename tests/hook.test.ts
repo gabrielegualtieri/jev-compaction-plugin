@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   compactSession,
+  customHookKeys,
   decisionLog,
   decisionLogLines,
+  jevAsker,
+  overlayHostConfig,
   resolveHookConfig,
   summarize,
   toSessionMessages,
@@ -53,7 +56,13 @@ function jevFetch(answer: (name: string) => number, bodies: string[] = []) {
 
 describe('hook config', () => {
   it('reads userConfig values and falls back to defaults', () => {
-    expect(resolveHookConfig({})).toEqual({ compactAtPercent: 60, minReductionRatio: 0.25, model: 'jev-latest' });
+    expect(resolveHookConfig({})).toEqual({
+      compactAtPercent: 60,
+      minReductionRatio: 0.25,
+      model: 'jev-latest',
+      provider: 'typesafe',
+      baseUrl: 'https://api.typesafe.ai/v1/systemone',
+    });
     expect(
       resolveHookConfig({ apiKey: 'k', keepThreshold: 0.3, maxStateTokens: 1000, model: 'jev-x', goal: 'g', compactAtPercent: 'no' }),
     ).toEqual({
@@ -64,6 +73,8 @@ describe('hook config', () => {
       goal: 'g',
       compactAtPercent: 60,
       minReductionRatio: 0.25,
+      provider: 'typesafe',
+      baseUrl: 'https://api.typesafe.ai/v1/systemone',
     });
   });
 });
@@ -145,5 +156,45 @@ describe('compactSession', () => {
     await expect(
       compactSession(transcript(), { ...config, apiKey: 'k' }, async () => ({ status: 500, ok: false, text: 'x' })),
     ).rejects.toThrow(/500/);
+    await expect(
+      compactSession(transcript(), { ...config, provider: 'openrouter' }, jevFetch(() => 0)),
+    ).rejects.toThrow(/OPENROUTER_API_KEY/);
+  });
+});
+
+describe('provider overlay', () => {
+  it('lets the setup file select OpenRouter when the plugin UI kept the defaults', () => {
+    const options = { provider: 'typesafe', model: 'jev-latest', keepThreshold: 0.5, apiKey: '' };
+    expect(customHookKeys(options).has('provider')).toBe(false);
+    const config = overlayHostConfig(resolveHookConfig(options), { provider: 'openrouter', apiKey: 'or-key' }, customHookKeys(options));
+    expect(config.provider).toBe('openrouter');
+    expect(config.baseUrl).toBe('https://openrouter.ai/api/v1/systemone');
+    expect(config.apiKey).toBe('or-key');
+  });
+
+  it('keeps a non-default plugin provider over the setup file', () => {
+    const options = { provider: 'openrouter', apiKey: 'from-ui' };
+    const config = overlayHostConfig(
+      resolveHookConfig(options),
+      { provider: 'typesafe', apiKey: 'from-file' },
+      customHookKeys(options),
+    );
+    expect(config.provider).toBe('openrouter');
+    expect(config.apiKey).toBe('from-ui');
+    expect(config.baseUrl).toBe('https://openrouter.ai/api/v1/systemone');
+  });
+
+  it('posts System One requests to the provider URL', async () => {
+    let url = '';
+    await jevAsker(
+      async (target) => {
+        url = target;
+        return { status: 200, ok: true, text: JSON.stringify({ answers: { call_t1: { noul: 0.5 } } }) };
+      },
+      'key',
+      'jev-latest',
+      'https://openrouter.ai/api/v1/systemone',
+    ).ask({ context: 'x' }, { call_t1: { type: 'noul', instructions: 'stay' } });
+    expect(url).toBe('https://openrouter.ai/api/v1/systemone');
   });
 });

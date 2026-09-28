@@ -1,7 +1,7 @@
 {
   "name": "fast-jev-compaction",
-  "version": "0.2.0",
-  "description": "Continuous, verbatim context compaction for LLM agents using TypeSafe's Jev model.",
+  "version": "0.4.0",
+  "description": "Verbatim context compaction with TypeSafe Jev, directly or through OpenRouter. Claude Code plugin and Codex plugin.",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -23,6 +23,7 @@
     "typecheck": "tsc --noEmit && npm run typecheck:hooks",
     "test": "vitest run",
     "demo": "tsx examples/demo.ts",
+    "setup": "node scripts/setup.mjs",
     "typecheck:hooks": "tsc -p tsconfig.hooks.json",
     "validate:plugin": "claude plugin validate .claude-plugin/plugin.json"
   },

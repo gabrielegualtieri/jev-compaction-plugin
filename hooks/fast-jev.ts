@@ -8,7 +8,9 @@ import type {
   TurnCompleteInput,
 } from 'claude-code';
 
+import { parseUserConfigText, type HostConfig } from '../src/config-file.js';
 import { compact, reductionRatio, resolveOptions } from '../src/compact.js';
+import { parseProvider, providerOf, type ProviderName } from '../src/provider.js';
 import { buildJevRequest, DEFAULT_MODEL, parseJevResponse } from '../src/request.js';
 import type {
   CompactOptions,
@@ -42,9 +44,23 @@ export type HookFetch = (url: string, init?: HookFetchInit) => Promise<HookFetch
 
 export type HookConfig = CompactOptions & {
   apiKey?: string;
+  provider: ProviderName;
+  baseUrl: string;
   compactAtPercent: number;
   minReductionRatio: number;
   model: string;
+};
+
+const PLUGIN_DEFAULTS = {
+  provider: 'typesafe' as const,
+  model: DEFAULT_MODEL,
+  keepThreshold: 0.5,
+  preserveRecentMessages: 6,
+  maxStateTokens: 25_000,
+  maxRequestTokens: 30_000,
+  truncateHeadChars: 300,
+  compactAtPercent: 60,
+  minReductionRatio: 0.25,
 };
 
 function optionNumber(options: PluginOptions, key: string, fallback: number): number {
@@ -70,8 +86,11 @@ export function resolveHookConfig(options: PluginOptions): HookConfig {
     const value = options[key];
     if (typeof value === 'number' && Number.isFinite(value)) numbers[key] = value;
   }
+  const provider = parseProvider(options['provider']) ?? PLUGIN_DEFAULTS.provider;
   const config: HookConfig = {
     ...numbers,
+    provider,
+    baseUrl: optionString(options, 'baseUrl') ?? providerOf(provider).baseUrl,
     compactAtPercent: optionNumber(options, 'compactAtPercent', HOOK_DEFAULTS.compactAtPercent),
     minReductionRatio: optionNumber(
       options,
@@ -87,11 +106,75 @@ export function resolveHookConfig(options: PluginOptions): HookConfig {
   return config;
 }
 
+/**
+ * Keys the installer actually changed. Values equal to the manifest default are
+ * not custom, so the per-host setup file can still select OpenRouter and thresholds.
+ * A non-empty `apiKey` is always custom.
+ */
+export function customHookKeys(options: PluginOptions): Set<string> {
+  const keys = new Set<string>();
+  if (optionString(options, 'apiKey')) keys.add('apiKey');
+  if (optionString(options, 'baseUrl')) keys.add('baseUrl');
+  if (optionString(options, 'goal')) keys.add('goal');
+  const provider = parseProvider(optionString(options, 'provider'));
+  if (provider && provider !== PLUGIN_DEFAULTS.provider) keys.add('provider');
+  const model = optionString(options, 'model');
+  if (model && model !== PLUGIN_DEFAULTS.model) keys.add('model');
+  for (const key of [
+    'keepThreshold',
+    'preserveRecentMessages',
+    'maxStateTokens',
+    'maxRequestTokens',
+    'truncateHeadChars',
+    'compactAtPercent',
+    'minReductionRatio',
+  ] as const) {
+    const value = options[key];
+    if (typeof value === 'number' && Number.isFinite(value) && value !== PLUGIN_DEFAULTS[key]) {
+      keys.add(key);
+    }
+  }
+  return keys;
+}
+
+/** File values fill anything the plugin UI left at its default. */
+export function overlayHostConfig(
+  config: HookConfig,
+  host: HostConfig,
+  custom: Set<string>,
+): HookConfig {
+  const next: HookConfig = { ...config };
+  if (host.provider && !custom.has('provider')) next.provider = host.provider;
+  if (host.apiKey && !custom.has('apiKey')) next.apiKey = host.apiKey;
+  if (host.model && !custom.has('model')) next.model = host.model;
+  if (host.goal && !custom.has('goal')) next.goal = host.goal;
+  for (const key of [
+    'keepThreshold',
+    'preserveRecentMessages',
+    'maxStateTokens',
+    'maxRequestTokens',
+    'truncateHeadChars',
+    'compactAtPercent',
+    'minReductionRatio',
+  ] as const) {
+    const value = host[key];
+    if (typeof value === 'number' && !custom.has(key)) next[key] = value;
+  }
+  if (host.baseUrl && !custom.has('baseUrl')) next.baseUrl = host.baseUrl;
+  else if (!custom.has('baseUrl')) next.baseUrl = providerOf(next.provider).baseUrl;
+  return next;
+}
+
 /** A `JevAsker` over the engine's `$.http.fetch`. */
-export function jevAsker(fetchFn: HookFetch, apiKey: string, model: string): JevAsker {
+export function jevAsker(
+  fetchFn: HookFetch,
+  apiKey: string,
+  model: string,
+  baseUrl?: string,
+): JevAsker {
   return {
     async ask(state, questions) {
-      const request = buildJevRequest({ apiKey, model }, state, questions);
+      const request = buildJevRequest({ apiKey, model, baseUrl }, state, questions);
       const response = await fetchFn(request.url, {
         method: request.method,
         headers: request.headers,
@@ -167,8 +250,12 @@ export async function compactSession(
   config: HookConfig,
   fetchFn: HookFetch,
 ): Promise<SessionCompaction> {
-  if (!config.apiKey) throw new Error('TYPESAFE_API_KEY is not configured');
-  const result = await compact(messages, jevAsker(fetchFn, config.apiKey, config.model), config);
+  if (!config.apiKey) throw new Error(`${providerOf(config.provider).envKey} is not configured`);
+  const result = await compact(
+    messages,
+    jevAsker(fetchFn, config.apiKey, config.model, config.baseUrl),
+    config,
+  );
   return { result, messages: toSessionMessages(messages, result.messages) };
 }
 
@@ -224,23 +311,66 @@ export function decisionLogLines(
   );
 }
 
-async function getApiKey(
+async function readClaudeFile(configPath: string | undefined): Promise<HostConfig> {
+  try {
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const file =
+      configPath && configPath.length > 0
+        ? configPath
+        : path.join(os.homedir(), '.config', 'jev-compaction', 'config.json');
+    return parseUserConfigText(fs.readFileSync(file, 'utf8')).claude ?? {};
+  } catch {
+    return {};
+  }
+}
+
+async function envString(
   $: {
     env: { get: (name: string) => Promise<string | undefined> };
     settings: { read: () => Promise<Readonly<Record<string, unknown>>> };
   },
-  config: HookConfig,
+  name: string,
 ): Promise<string | undefined> {
-  if (config.apiKey) return config.apiKey;
-  const fromEnv = await $.env.get('TYPESAFE_API_KEY');
+  const fromEnv = await $.env.get(name);
   if (fromEnv) return fromEnv;
   const settings = await $.settings.read();
   const env = settings['env'];
   if (env && typeof env === 'object') {
-    const value = (env as Record<string, unknown>)['TYPESAFE_API_KEY'];
+    const value = (env as Record<string, unknown>)[name];
     if (typeof value === 'string' && value) return value;
   }
   return undefined;
+}
+
+/** Plugin UI, then the setup file, then the provider's environment variable. */
+export async function resolveRuntimeConfig(
+  $: {
+    env: { get: (name: string) => Promise<string | undefined> };
+    settings: { read: () => Promise<Readonly<Record<string, unknown>>> };
+  },
+  configured: HookConfig,
+  custom: Set<string>,
+): Promise<HookConfig> {
+  const file = await readClaudeFile(await $.env.get('JEV_COMPACTION_CONFIG'));
+  let config = overlayHostConfig(configured, file, custom);
+  const fileSetProvider = file.provider !== undefined && !custom.has('provider');
+  if (!custom.has('provider') && !fileSetProvider) {
+    const fromEnv = parseProvider(await envString($, 'JEV_COMPACTION_PROVIDER'));
+    if (fromEnv) {
+      config = {
+        ...config,
+        provider: fromEnv,
+        baseUrl: custom.has('baseUrl') ? config.baseUrl : providerOf(fromEnv).baseUrl,
+      };
+    }
+  }
+  if (!config.apiKey) {
+    const key = await envString($, providerOf(config.provider).envKey);
+    if (key) config = { ...config, apiKey: key };
+  }
+  return config;
 }
 
 function notify(
@@ -258,11 +388,12 @@ function notify(
 
 export const register: Register = (on: On, options: PluginOptions) => {
   const configured = resolveHookConfig(options);
+  const custom = customHookKeys(options);
   let compacting = false;
 
   on('session.compact', async ($, event, next) => {
     try {
-      const config = { ...configured, apiKey: await getApiKey($, configured) };
+      const config = await resolveRuntimeConfig($, configured, custom);
       const { result, messages } = await compactSession(event.messages, config, async (url, init) => {
         const response = await $.http.fetch(url, init);
         return { status: response.status, ok: response.ok, text: response.text };

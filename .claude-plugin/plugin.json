@@ -1,13 +1,19 @@
 {
   "name": "fast-jev-compaction",
-  "version": "0.3.0",
-  "description": "Verbatim Jev-guided compaction for Claude Code sessions.",
+  "version": "0.4.0",
+  "description": "Verbatim Jev compaction for Claude Code. TypeSafe or OpenRouter.",
   "license": "MIT",
   "userConfig": {
+    "provider": {
+      "type": "string",
+      "title": "Jev provider",
+      "description": "typesafe or openrouter. Leave the default to use the setup file. typesafe calls api.typesafe.ai. openrouter calls https://openrouter.ai/api/v1/systemone with the same request.",
+      "default": "typesafe"
+    },
     "apiKey": {
       "type": "string",
-      "title": "TypeSafe API key",
-      "description": "TypeSafe API key. Leave unset to use TYPESAFE_API_KEY.",
+      "title": "Jev API key",
+      "description": "Key for the selected provider. Leave empty to use the setup file or TYPESAFE_API_KEY / OPENROUTER_API_KEY.",
       "sensitive": true
     },
     "keepThreshold": {
@@ -55,7 +61,7 @@
     "model": {
       "type": "string",
       "title": "Jev model",
-      "description": "TypeSafe Jev model name.",
+      "description": "Model name. jev-latest works on TypeSafe and is mapped by OpenRouter. A non-default here overrides the setup file.",
       "default": "jev-latest"
     }
   }

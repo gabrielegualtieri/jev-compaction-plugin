@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/codex/hook.mjs\"",
+            "statusMessage": "Scoring tool output with Jev"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/codex/hook.mjs\"",
+            "statusMessage": "Restoring tool output Jev kept"
+          }
+        ]
+      }
+    ]
+  }
+}
